@@ -1,0 +1,15 @@
+{
+  "name": "ulogic_claw",
+  "version": "0.0.1",
+  "author": "houenxing",
+  "private": true,
+  "scripts": {
+  },
+  "dependencies": {
+    "log": "^1.4.0",
+    "bluebird": "^3.5.0",
+    "deepstream.io-client-js": "^2.2.0",
+    "validatorjs": "^3.13.3",
+    "request": "^2.81.0",
+  }
+}
