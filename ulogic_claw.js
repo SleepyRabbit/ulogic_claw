@@ -10,6 +10,8 @@ const CONST = {
     ticket_null: ""
 }
 
+const CONST_uLOGIC_NAME = "claw.single";
+
 
 function invalids_stringify(errors) {
     var info = "";
@@ -48,7 +50,7 @@ var client = deepstream(server).login({
                 delete glb_catcher_records[idx];
             }
             
-            client.rpc.unprovide('app.catcher/enroll');
+            client.rpc.unprovide('app.catcher/participate');
         }
         else{
             log.info("Login success!!!!");
@@ -64,7 +66,7 @@ var client = deepstream(server).login({
         }
 
         // 从deepstream读取设备列表list
-        let record_catcher_ids = client.record.getList('catcher_ids');   // getList
+        let record_catcher_ids = client.record.getList('ulogic_claw');   // getList
 
         record_catcher_ids.whenReady( (list) => {
             "use strict";
@@ -72,7 +74,10 @@ var client = deepstream(server).login({
                 log.info("You don't have any entry!");
             }
             else {
-                glb_catcher_ids = list.getEntries();     //getEntries
+                let entries = list.getEntries();                     // getEntries
+                entries.forEach( (entry, index) => {                 // Entries数组中存放的是字符串，而glb_catcher_ids是数值型数组，需要进行转换。
+                    glb_catcher_ids[index] = parseInt(entry);
+                } );
                 log.info("Have got list entries from deepstream!");
             }
 
@@ -81,8 +86,14 @@ var client = deepstream(server).login({
                 catcher_record_prepare(client, glb_catcher_ids[i]);
             log.info("Records prepared.");
 
-            client.rpc.provide('app.catcher/enroll', rpc_catcher_enroll);
+            client.rpc.provide('app.catcher/participate', rpc_catcher_participate);
             log.info("RPC prepared.");
+
+            //  订阅并处理来自设备侧的消息，设备将通过event的形式与ulogic模块进行通信，消息的格式为evt/scene/**
+            client.event.subscribe('evt/scene/' + CONST_uLOGIC_NAME, evt_catcher_scene );
+            log.info("Has subscribed: evt/scene/" +  CONST_uLOGIC_NAME);
+
+        log.info(glb_catcher_ids);
 
         });
 
@@ -96,16 +107,51 @@ var client = deepstream(server).login({
 
 
 
-function cb_catcher_newmachnie(data, response) {
+function evt_catcher_scene(data) {
 
-    // A new machine online.
+    // data {
+    //   sceneDID: 9527,
+    //   state: 'idle',
+    // }
 
-    let record_catcher_ids = client.record.getList('catcher_ids');   // getList
+    if(!data.sceneDID || !data.state) {
+        log.info('Wrong evt_catcher_scene data:!');
+        return;
+    }
 
-    record_catcher_ids.whenReady( (list) => {
-        "use strict";
-        list.addEntry(data.devid);
-    } )
+    log.info("evt_catcher_scene called!");
+
+    switch ( data.state ) {
+        case 'idle':
+            log.info("evt idle");
+            //判断设备的sceneDID是否已经在glb_catcher_ids中
+            log.info(glb_catcher_ids);
+            log.info(glb_catcher_ids.indexOf(data.sceneDID));
+            if( glb_catcher_ids.indexOf(data.sceneDID) <0 ) {
+                log.info("New device!");
+                glb_catcher_ids.push(data.sceneDID);
+
+                // 如果设备DID不在record list entries的记录中，需要添加进去
+                let record_catcher_ids = client.record.getList('catcher_ids');   // getList
+                record_catcher_ids.whenReady( (list) => {
+                    "use strict";
+                list.addEntry(String(data.sceneDID));
+
+                // let entries = list.getEntries();
+                // log.info(entries);
+                 } )
+            }
+            else {
+                log.info(glb_catcher_ids);
+                log.info("Device did already stored in glb_catcher_ids!");
+            }
+
+            // 
+           break;
+        // case '':
+        //     break;
+        default:
+    }
 }
 
 
@@ -165,7 +211,7 @@ function catcher_record_prepare(client, catcherID) {
 	}
 
 */
-function rpc_catcher_enroll(data, response) {
+function rpc_catcher_participate(data, response) {
 
     //response.autoAck = false;
     var valid_param = new Validator(data, {
@@ -177,7 +223,7 @@ function rpc_catcher_enroll(data, response) {
 
     if (valid_param.fails()) {	//tested
         var err = "param error" + invalids_stringify(valid_param.errors.all())
-        log.warning("rpc_catcher_enroll: " + err);
+        log.warning("rpc_catcher_participate: " + err);
         return response.error(err);
     }
 
@@ -189,7 +235,7 @@ function rpc_catcher_enroll(data, response) {
     //没有找到catcher
     if (glb_catcher_records[data.catcherID] === undefined) {	//tested
         const err = `${data.catcherID} not find.`;
-        log.warning("rpc_catcher_enroll: " + err);
+        log.warning("rpc_catcher_participate: " + err);
         return response.error(err);
     }
 
@@ -214,7 +260,7 @@ function rpc_catcher_enroll(data, response) {
             //设备不在线
             if (r.camera.status != "online") {
                 const err = `game ${data.catcherID} camera ${r.camera.status}.`;
-                log.warning("rpc_catcher_enroll: " + err);
+                log.warning("rpc_catcher_participate: " + err);
                 return response.send({ message: err });
             }
 
@@ -233,7 +279,7 @@ function rpc_catcher_enroll(data, response) {
                 client.event.emit(str_event_catcher, str_record_catcher);   //向event channel 发送 record 消息
 
                 const err = utl_who_do_thing_with_what(data.user_id, "play", data.catcherID, data.ticket?data.ticket:"melon");
-                log.info("rpc_catcher_enroll: " + err);
+                log.info("rpc_catcher_participate: " + err);
                 return response.send({ record: str_record_catcher, event: str_event_catcher });
             }
             //玩家位被占，但是队伍还有空
@@ -252,7 +298,7 @@ function rpc_catcher_enroll(data, response) {
                         client.event.emit(str_event_catcher, str_record_catcher);   //向event channel 发送 record 消息
 
                         const err = utl_who_do_thing_with_what(data.user_id, "join", data.catcherID, "melon");
-                        log.info("rpc_catcher_enroll: " + err);
+                        log.info("rpc_catcher_participate: " + err);
                     }
                     return response.send({ record: str_record_catcher, event: str_event_catcher });
                 }
@@ -267,7 +313,7 @@ function rpc_catcher_enroll(data, response) {
                     client.event.emit(str_event_catcher, str_record_catcher);   //向event channel 发送 record 消息
 
                     const err = utl_who_do_thing_with_what(data.user_id, "join", data.catcherID, data.ticket?data.ticket:"melon");
-                    log.info("rpc_catcher_enroll: " + err);
+                    log.info("rpc_catcher_participate: " + err);
                     return response.send({ record: str_record_catcher, event: str_event_catcher });
 
                 }
@@ -292,7 +338,7 @@ function rpc_catcher_enroll(data, response) {
 
                     const err = utl_who_do_thing_with_what(data.user_id, "jump into", data.catcherID, data.ticket?data.ticket:"melon", `kick out user'${victim}'`);
 //                    const err = `User"${data.user_id}" jump into game"${data.catcherID}" with ticket "${data.ticket}", kick out user"${victim}".`;
-                    log.info("rpc_catcher_enroll: " + err);
+                    log.info("rpc_catcher_participate: " + err);
 
                     return response.send({ record: str_record_catcher, event: str_event_catcher });
                 }
@@ -304,7 +350,7 @@ function rpc_catcher_enroll(data, response) {
                     if (pos.length > 0) {
                         const err = utl_who_do_thing_with_what(data.user_id, "back to", data.catcherID, data.ticket?data.ticket:"melon");
                         //const err = `User"${data.user_id}" come back to game"${data.catcherID}".`;
-                        log.info("rpc_catcher_enroll: " + err);
+                        log.info("rpc_catcher_participate: " + err);
 
                         return response.send({ record: str_record_catcher, event: str_event_catcher });
                     }
@@ -321,7 +367,7 @@ function rpc_catcher_enroll(data, response) {
 
                         const err = utl_who_do_thing_with_what(data.user_id, "try join", data.catcherID, data.ticket?data.ticket:"melon", "but pity");
     //                    const err = `User"${data.user_id}" try join game"${data.catcherID}", but pity.`;
-                        log.info("rpc_catcher_enroll: " + err);
+                        log.info("rpc_catcher_participate: " + err);
                         return response.send({ full: `${r.game.q_capacity}|${CONST.concurrent_player_max}|${tickets}|${melon}` });
                     }
                 }
@@ -333,7 +379,7 @@ function rpc_catcher_enroll(data, response) {
         //有票据 但是检查出错
         (msg) => {
             const err = `User"${data.user_id}"'s ticket"${data.ticket}" rejected: ${msg}.`;
-            log.error("rpc_catcher_enroll: " + err);
+            log.error("rpc_catcher_participate: " + err);
             return response.error(err);
         });
 
