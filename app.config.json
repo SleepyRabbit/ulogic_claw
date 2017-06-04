@@ -1,0 +1,8 @@
+{
+  "uLogicClaw": {
+    "dsURL": "localhost:6020",
+    "uLogicName": "claw.single",
+    "iDSListName": "ulogic_claw",
+    "MaxQueueLength": 20
+  }
+}

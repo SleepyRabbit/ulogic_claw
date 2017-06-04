@@ -3,6 +3,7 @@ const Log = require('log'),
 const Promise = require("bluebird");
 const deepstream = require('deepstream.io-client-js')
 const Validator = require('validatorjs');
+const config = require('./app.config.json');
 
 const CONST = {
     queue_occupation_max: 3, //同一个人在队伍中的最多占位
@@ -10,8 +11,13 @@ const CONST = {
     ticket_null: ""
 }
 
-const CONST_uLOGIC_NAME = "claw.single";
+const CONST_uLOGIC_NAME = config.uLogicClaw.uLogicName;
+const CONST_iDS_LIST_NAME = config.uLogicClaw.iDSListName;
+const CONST_uLOGIC_SERVER = config.uLogicClaw.dsURL;
+const CONST_MAX_QUEUE_LENGTH = config.uLogicClaw.MaxQueueLength;
 
+const glb_catcher_ids = [9527]; //在册设备编号
+const glb_catcher_records = []; //record 集合
 
 function invalids_stringify(errors) {
     var info = "";
@@ -21,15 +27,8 @@ function invalids_stringify(errors) {
     return info;
 }
 
-
-const glb_catcher_ids = [9527]; //在册设备编号
-const glb_catcher_records = []; //record 集合
-
-const server = "localhost:6020";
-// const server = "192.168.31.109:6020";
-
-var client = deepstream(server).login({
-    username: 'app.catcher',
+var client = deepstream(CONST_uLOGIC_SERVER).login({
+    username: 'ulogic.claw',
     password: 'thisisatestkey' // NEEDS TO BE REAL
 }, function(success, data) {
 
@@ -50,7 +49,7 @@ var client = deepstream(server).login({
                 delete glb_catcher_records[idx];
             }
             
-            client.rpc.unprovide('app.catcher/participate');
+            client.rpc.unprovide('rpc/${CONST_uLOGIC_NAME}/participate');
         }
         else{
             log.info("Login success!!!!");
@@ -66,9 +65,9 @@ var client = deepstream(server).login({
         }
 
         // 从deepstream读取设备列表list
-        let record_catcher_ids = client.record.getList('ulogic_claw');   // getList
+        let record_list_ids = client.record.getList(CONST_iDS_LIST_NAME);   // getList
 
-        record_catcher_ids.whenReady( (list) => {
+        record_list_ids.whenReady( (list) => {
             "use strict";
             if( list.isEmpty() ) {
                 log.info("You don't have any entry!");
@@ -86,14 +85,14 @@ var client = deepstream(server).login({
                 catcher_record_prepare(client, glb_catcher_ids[i]);
             log.info("Records prepared.");
 
-            client.rpc.provide('app.catcher/participate', rpc_catcher_participate);
+            client.rpc.provide(`rpc/${CONST_uLOGIC_NAME}/participate`, rpc_uLogic_claw_participate);
             log.info("RPC prepared.");
 
             //  订阅并处理来自设备侧的消息，设备将通过event的形式与ulogic模块进行通信，消息的格式为evt/scene/**
             client.event.subscribe('evt/scene/' + CONST_uLOGIC_NAME, evt_catcher_scene );
             log.info("Has subscribed: evt/scene/" +  CONST_uLOGIC_NAME);
 
-        log.info(glb_catcher_ids);
+            log.info(glb_catcher_ids);
 
         });
 
@@ -126,19 +125,18 @@ function evt_catcher_scene(data) {
             log.info("evt idle");
             //判断设备的sceneDID是否已经在glb_catcher_ids中
             log.info(glb_catcher_ids);
-            log.info(glb_catcher_ids.indexOf(data.sceneDID));
             if( glb_catcher_ids.indexOf(data.sceneDID) <0 ) {
-                log.info("New device!");
+                log.info("New device: " + data.sceneDID);
                 glb_catcher_ids.push(data.sceneDID);
 
                 // 如果设备DID不在record list entries的记录中，需要添加进去
-                let record_catcher_ids = client.record.getList('catcher_ids');   // getList
+                record_catcher_ids = client.record.getList(CONST_iDS_LIST_NAME);   // getList
                 record_catcher_ids.whenReady( (list) => {
                     "use strict";
                 list.addEntry(String(data.sceneDID));
 
-                // let entries = list.getEntries();
-                // log.info(entries);
+                let entries = list.getEntries();
+                log.info(entries);
                  } )
             }
             else {
@@ -157,9 +155,8 @@ function evt_catcher_scene(data) {
 
 //为某一个编号的catcher准备接口和
 function catcher_record_prepare(client, catcherID) {
-    const str_record_catcher = `cache/app.catcher/${catcherID}`;
-    const str_event_catcher = `evt/app.catcher/${catcherID}`;
-
+    const str_record_catcher = `cache/${CONST_uLOGIC_NAME}/${catcherID}`;
+    const str_event_catcher = `evt/${CONST_uLOGIC_NAME}/${catcherID}`;
 
     var record = client.record.getRecord(str_record_catcher);
 
@@ -172,18 +169,19 @@ function catcher_record_prepare(client, catcherID) {
         	stream:"rtmp://xx"	//流地址
         }
         */
+        // record.delete();
         let r = record.get();
-        if (!r.camera || !r.stream || !r.queue) {
-            if (!r.camera)
-                r.camera = catcher_camera_reset(catcherID);
+        if (!r.state || !r.stream || !r.q_usr) {
+            if (!r.state)
+                r.state = catcher_camera_reset(catcherID);
             if (!r.stream)
                 r.stream = catcher_stream_reset(catcherID);
-            if (!r.queue)
-                r.queue = catcher_queue_reset(catcherID);
-            if (!r.qticket)
-                r.qticket = catcher_qticket_reset(catcherID);
-            if (!r.game)
-                r.game = catcher_game_info(catcherID);
+            if (!r.q_usr)
+                r.q_usr = catcher_queue_reset(catcherID);
+            if (!r.q_screen)
+                r.q_screen = catcher_qscreen_reset(catcherID);
+            if (!r.params)
+                r.params = catcher_params_info(catcherID);
 
             record.set(r);
             log.info(`Init ds_record: ${str_record_catcher}`);
@@ -203,6 +201,89 @@ function catcher_record_prepare(client, catcherID) {
 }
 
 /*
+ 参与队列，参数如下：
+ {
+ catcherID: number,
+ user_id: string,
+ }
+*/
+
+function rpc_uLogic_claw_participate(data, response) {
+    "use strict";
+    log.info('rpc_uLogic_claw_participate called!');
+    //response.autoAck = false;
+    var valid_param = new Validator(data, {
+        catcherID: 'required|integer',
+        userID: 'required|string',
+    });
+
+    if (valid_param.fails()) {	//tested
+        var err = "param error" + invalids_stringify(valid_param.errors.all())
+        log.warning("rpc_catcher_participate: " + err);
+        return response.error(err);
+    }
+
+    const str_record_catcher = `cache/${CONST_uLOGIC_NAME}/${data.catcherID}`,
+    str_event_catcher = `event/${CONST_uLOGIC_NAME}/${data.catcherID}`;
+
+
+    //检查glb_catcher_records中是否记录了当前设备ID所对应的record
+    if (glb_catcher_records[data.catcherID] === undefined) {	//tested
+        const err = `${data.catcherID} not find.`;
+        log.warning("rpc_catcher_participate: " + err);
+        return response.error(err);
+    }
+
+    //提取catcher状态
+    /*
+     snapshot获取数据结构：
+     {
+         state:{status:"online/offline/error"},
+         stream:"rtmp://xx"
+         //参与者排队id数组
+         q_usr:[“aa”,"bb","cc"],
+         q_screen:["zH32sD", "", "..."], //空串表示未绑定屏
+         params:{
+         queue: {rest:3, driver:1, wait:10, free:2}   //队列信息
+         }
+     }
+     */
+
+    log.info(str_record_catcher);
+
+    client.record.has(str_record_catcher, (err, hasRecord) => {
+        if(hasRecord) {
+            client.record.snapshot(str_record_catcher, (err, dataRecord) => {
+                // console.log(dataRecord);
+                if(!dataRecord.q_usr) {
+                    log.info("No queue data!");
+                }
+                else {
+                    console.log(dataRecord.q_usr);
+                    console.log(data.userID);
+                    console.log(dataRecord.q_usr.indexOf(data.usrID));
+                    if( dataRecord.q_usr.indexOf(data.usrID) <0 ) {
+                        let q_len = dataRecord.q_usr.length;   //获取排队数组长度
+                        if(q_len < CONST_MAX_QUEUE_LENGTH) {
+                            dataRecord.q_usr.push(data.userID);
+                            glb_catcher_records[data.catcherID].set(dataRecord);
+                            log.info("Join the queue...")
+                        }
+                        else {
+                            log.info("The queue is full!");
+                        }
+                    }
+                    else {
+                        log.info("You are already in the queue!");
+                    }
+                }
+            })
+        }
+    })
+
+}
+
+/*
 	参与队列，参数如下：
 	{
 		catcherID: number,
@@ -211,7 +292,7 @@ function catcher_record_prepare(client, catcherID) {
 	}
 
 */
-function rpc_catcher_participate(data, response) {
+function rpc_catcher_enroll(data, response) {
 
     //response.autoAck = false;
     var valid_param = new Validator(data, {
@@ -229,8 +310,8 @@ function rpc_catcher_participate(data, response) {
 
 
 
-    const str_record_catcher = `cache/app.catcher/${data.catcherID}`,
-    str_event_catcher = `event/app.catcher/${data.catcherID}`;
+    const str_record_catcher = `cache/${CONST_uLOGIC_NAME}/${data.catcherID}`,
+    str_event_catcher = `event/${CONST_uLOGIC_NAME}/${data.catcherID}`;
 
     //没有找到catcher
     if (glb_catcher_records[data.catcherID] === undefined) {	//tested
@@ -475,15 +556,14 @@ function catcher_queue_reset(catcherID) {
     return [];
 }
 
-function catcher_qticket_reset(catcherID) {
-    return [];
+function catcher_qscreen_reset(catcherID) {
+    return ["zH32sD", "", "..."];
 }
-
 
 function catcher_stream_reset(catcherID) {
     return `rtmp://live.hkstv.hk.lxdns.com/live/hks`;
 }
 
-function catcher_game_info(catcherID) {
-    return { q_capacity: 16 };
+function catcher_params_info(catcherID) {
+    return { queue: {rest:3, driver:1, wait:10, free:2} };    //队列信息
 }
