@@ -121,7 +121,7 @@ function evt_catcher_scene(data) {
     log.info("evt_catcher_scene called!");
 
     switch ( data.state ) {
-        case 'idle':
+        case 'ready':
             log.info("evt idle");
             //判断设备的sceneDID是否已经在glb_catcher_ids中
             log.info(glb_catcher_ids);
@@ -142,6 +142,16 @@ function evt_catcher_scene(data) {
             else {
                 log.info(glb_catcher_ids);
                 log.info("Device did already stored in glb_catcher_ids!");
+
+                const str_record_catcher = `cache/${CONST_uLOGIC_NAME}/${glb_catcher_ids}`;
+                const str_event_catcher = `event/${CONST_uLOGIC_NAME}/${glb_catcher_ids}`;
+
+                var record = client.record.getRecord(str_record_catcher);
+
+                record.whenReady(() => {
+                    "use strict";
+
+                })
             }
 
             // 
@@ -157,6 +167,7 @@ function evt_catcher_scene(data) {
 function catcher_record_prepare(client, catcherID) {
     const str_record_catcher = `cache/${CONST_uLOGIC_NAME}/${catcherID}`;
     const str_event_catcher = `evt/${CONST_uLOGIC_NAME}/${catcherID}`;
+    console.log(str_record_catcher);
 
     var record = client.record.getRecord(str_record_catcher);
 
@@ -223,8 +234,8 @@ function rpc_uLogic_claw_participate(data, response) {
         return response.error(err);
     }
 
-    const str_record_catcher = `cache/${CONST_uLOGIC_NAME}/${data.catcherID}`,
-    str_event_catcher = `event/${CONST_uLOGIC_NAME}/${data.catcherID}`;
+    const str_record_catcher = `cache/${CONST_uLOGIC_NAME}/${data.catcherID}`;
+    const str_event_catcher = `event/${CONST_uLOGIC_NAME}/${data.catcherID}`;
 
 
     //检查glb_catcher_records中是否记录了当前设备ID所对应的record
